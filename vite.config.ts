@@ -11,7 +11,16 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["offline.html", "icon-192.svg", "icon-512.svg", "maskable-icon.svg"],
+      includeAssets: [
+        "offline.html",
+        "icon-192.svg",
+        "icon-512.svg",
+        "maskable-icon.svg",
+        "pwa-192x192.png",
+        "pwa-512x512.png",
+        "pwa-maskable-512x512.png",
+        "apple-touch-icon.png"
+      ],
       manifest: {
         name: "Smart Career Hub",
         short_name: "CareerHub",
@@ -23,22 +32,25 @@ export default defineConfig({
         scope: "/",
         icons: [
           {
-            src: "/icon-192.svg",
+            src: "/pwa-192x192.png",
             sizes: "192x192",
-            type: "image/svg+xml"
+            type: "image/png"
           },
           {
-            src: "/icon-512.svg",
+            src: "/pwa-512x512.png",
             sizes: "512x512",
-            type: "image/svg+xml"
+            type: "image/png"
           },
           {
-            src: "/maskable-icon.svg",
+            src: "/pwa-maskable-512x512.png",
             sizes: "512x512",
-            type: "image/svg+xml",
+            type: "image/png",
             purpose: "maskable"
           }
         ]
+      },
+      devOptions: {
+        enabled: true
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,webp,woff2}"],

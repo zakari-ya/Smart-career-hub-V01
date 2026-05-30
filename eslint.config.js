@@ -5,7 +5,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist", "node_modules", "coverage", ".vercel", "supabase/.temp"]
+    ignores: ["dist", "dev-dist", "node_modules", "coverage", ".vercel", "supabase/.temp"]
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
