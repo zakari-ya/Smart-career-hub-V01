@@ -53,10 +53,10 @@ export function DashboardSidebar() {
               end={item.href === "/dashboard"}
               className={({ isActive }) =>
                 cn(
-                  "flex min-h-12 items-center gap-3 rounded-[20px] px-3 py-3 text-sm font-semibold outline-none motion-safe-transition focus-visible:ring-2 focus-visible:ring-[var(--color-teal-500)]",
+                  "relative flex min-h-12 items-center gap-3 overflow-hidden rounded-[20px] px-3 py-3 text-sm font-semibold outline-none transition-all duration-200 ease-out motion-safe:hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-[var(--color-teal-500)]",
                   isActive
-                    ? " text-white "
-                    : "text-[var(--color-graphite-700)] hover:bg-white hover:text-[var(--color-graphite-950)]"
+                    ? "bg-white text-[var(--color-graphite-950)] shadow-[0_12px_28px_rgba(15,23,32,0.08)] ring-1 ring-black/6 before:absolute before:inset-y-2 before:left-2 before:w-1 before:rounded-full before:bg-[var(--color-teal-500)]"
+                    : "text-[var(--color-graphite-700)] hover:bg-white hover:text-[var(--color-graphite-950)] hover:shadow-[0_10px_24px_rgba(15,23,32,0.06)] hover:ring-1 hover:ring-black/5"
                 )
               }
             >

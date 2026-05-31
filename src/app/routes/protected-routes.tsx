@@ -17,6 +17,9 @@ const ResumeResultPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("@/pages/settings/settings-page").then((module) => ({ default: module.SettingsPage }))
 );
+const SetPasswordPage = lazy(() =>
+  import("@/pages/auth/set-password-page").then((module) => ({ default: module.SetPasswordPage }))
+);
 
 function withSuspense(element: React.ReactNode) {
   return <Suspense fallback={<PageLoader />}>{element}</Suspense>;
@@ -46,6 +49,10 @@ export const protectedRoutes: RouteObject[] = [
       {
         path: "settings",
         element: withSuspense(<SettingsPage />)
+      },
+      {
+        path: "set-password",
+        element: withSuspense(<SetPasswordPage />)
       }
     ]
   }

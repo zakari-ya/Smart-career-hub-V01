@@ -1,7 +1,10 @@
 export {
-  resendSignupConfirmation,
+  resendSignupCode,
+  sendPasswordResetEmail,
+  setCurrentUserPassword,
   signInWithMagicLink,
   signInWithPassword,
   signOutUser,
-  signUpWithPassword
+  signUpWithPassword,
+  verifySignupCode
 } from "@/lib/supabase/auth";

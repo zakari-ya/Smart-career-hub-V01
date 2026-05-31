@@ -7,6 +7,14 @@ import { useAuth } from "@/features/auth/hooks/use-auth";
 import { supabaseConfigurationMessage } from "@/lib/env";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
+function getSafeNextPath(nextPath: string | null) {
+  if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
+    return "/dashboard";
+  }
+
+  return nextPath;
+}
+
 export function AuthCallbackPage() {
   const navigate = useNavigate();
   const { refreshSession, isConfigured } = useAuth();
@@ -26,6 +34,7 @@ export function AuthCallbackPage() {
       const url = new URL(window.location.href);
       const searchParams = url.searchParams;
       const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
+      const nextPath = getSafeNextPath(searchParams.get("next") ?? hashParams.get("next"));
       const authError =
         searchParams.get("error_description") ??
         hashParams.get("error_description") ??
@@ -55,7 +64,7 @@ export function AuthCallbackPage() {
       }
 
       await refreshSession();
-      navigate(data.session ? "/dashboard" : "/login", { replace: true });
+      navigate(data.session ? nextPath : "/login", { replace: true });
     };
 
     void finishCallback();

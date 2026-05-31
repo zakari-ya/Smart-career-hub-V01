@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { DashboardHeader } from "@/components/layout/dashboard-header";
 import { DashboardSidebar } from "@/components/layout/dashboard-sidebar";
 import { MobileNavigation } from "@/components/layout/mobile-navigation";
+import { PasswordSecurityBanner } from "@/components/layout/password-security-banner";
 
 export function AppShell() {
   return (
@@ -11,6 +12,7 @@ export function AppShell() {
         <DashboardSidebar />
         <div className="flex min-h-screen min-w-0 flex-1 flex-col lg:pl-[5.5rem]">
           <DashboardHeader />
+          <PasswordSecurityBanner />
           <main className="flex-1 px-4 py-5 pb-28 sm:px-5 lg:px-7 lg:pb-8">
             <Outlet />
           </main>
