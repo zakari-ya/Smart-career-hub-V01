@@ -9,6 +9,9 @@ const SignupPage = lazy(() => import("@/pages/auth/signup-page").then((module) =
 const AuthCallbackPage = lazy(() =>
   import("@/pages/auth/auth-callback-page").then((module) => ({ default: module.AuthCallbackPage }))
 );
+const SetPasswordPage = lazy(() =>
+  import("@/pages/auth/set-password-page").then((module) => ({ default: module.SetPasswordPage }))
+);
 
 function withSuspense(element: React.ReactNode) {
   return <Suspense fallback={<PageLoader />}>{element}</Suspense>;
@@ -30,5 +33,9 @@ export const publicRoutes: RouteObject[] = [
   {
     path: "/auth/callback",
     element: withSuspense(<AuthCallbackPage />)
+  },
+  {
+    path: "/reset-password",
+    element: withSuspense(<SetPasswordPage mode="recovery" />)
   }
 ];

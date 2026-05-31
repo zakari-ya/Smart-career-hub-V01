@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/hooks/use-auth";
+import { PASSWORD_RECOVERY_STORAGE_KEY } from "@/features/auth/constants";
 import { supabaseConfigurationMessage } from "@/lib/env";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -34,7 +35,17 @@ export function AuthCallbackPage() {
       const url = new URL(window.location.href);
       const searchParams = url.searchParams;
       const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
-      const nextPath = getSafeNextPath(searchParams.get("next") ?? hashParams.get("next"));
+      const flow = searchParams.get("flow") ?? hashParams.get("flow");
+      const callbackType = searchParams.get("type") ?? hashParams.get("type");
+      const recoveryMarker = window.localStorage.getItem(PASSWORD_RECOVERY_STORAGE_KEY);
+      const isPasswordRecovery =
+        flow === "password_recovery" ||
+        callbackType === "recovery" ||
+        recoveryMarker === "pending" ||
+        recoveryMarker === "active";
+      const nextPath = isPasswordRecovery
+        ? "/reset-password"
+        : getSafeNextPath(searchParams.get("next") ?? hashParams.get("next"));
       const authError =
         searchParams.get("error_description") ??
         hashParams.get("error_description") ??
@@ -64,7 +75,16 @@ export function AuthCallbackPage() {
       }
 
       await refreshSession();
-      navigate(data.session ? nextPath : "/login", { replace: true });
+      if (!data.session) {
+        setCallbackError(
+          isPasswordRecovery
+            ? "Your password reset link could not be completed. Please request a new reset email."
+            : "We could not find an active session. Please log in again."
+        );
+        return;
+      }
+
+      navigate(nextPath, { replace: true });
     };
 
     void finishCallback();

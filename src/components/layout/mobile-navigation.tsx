@@ -32,7 +32,7 @@ export function MobileNavigation() {
             className={({ isActive }) =>
               cn(
                 "flex min-h-11 flex-col items-center justify-center gap-1 rounded-[18px] px-1 text-[10px] font-bold leading-none",
-                isActive ? " text-white" : "text-[var(--color-graphite-700)]"
+                isActive ? " text-black" : ""
               )
             }
           >

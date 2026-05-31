@@ -1,12 +1,18 @@
 import { getSupabaseBrowserClient, requireSupabaseBrowserClient } from "@/lib/supabase/client";
 import { env } from "@/lib/env";
+import { PASSWORD_RECOVERY_STORAGE_KEY } from "@/features/auth/constants";
 
 function getAuthRedirectUrl() {
   return `${env.VITE_APP_URL.replace(/\/$/, "")}/auth/callback`;
 }
 
 function getPasswordResetRedirectUrl() {
-  return `${getAuthRedirectUrl()}?next=/dashboard/set-password`;
+  const params = new URLSearchParams({
+    flow: "password_recovery",
+    next: "/reset-password"
+  });
+
+  return `${getAuthRedirectUrl()}?${params.toString()}`;
 }
 
 function normalizeEmail(email: string) {
@@ -17,6 +23,10 @@ function normalizeCode(code: string) {
   return code.replace(/\D/g, "").slice(0, 6);
 }
 
+function clearPasswordRecoveryMarker() {
+  window.localStorage.removeItem(PASSWORD_RECOVERY_STORAGE_KEY);
+}
+
 export async function signInWithPassword(email: string, password: string) {
   const client = requireSupabaseBrowserClient();
   const { data, error } = await client.auth.signInWithPassword({
@@ -25,6 +35,7 @@ export async function signInWithPassword(email: string, password: string) {
   });
 
   if (!error && data.session) {
+    clearPasswordRecoveryMarker();
     await ensureCurrentUserProfile();
   }
 
@@ -166,6 +177,7 @@ export async function verifySignupCode(email: string, code: string) {
     return { session: data.session, user: data.user, error };
   }
 
+  clearPasswordRecoveryMarker();
   const { error: profileError } = await ensureCurrentUserProfile();
 
   return {
@@ -177,6 +189,8 @@ export async function verifySignupCode(email: string, code: string) {
 
 export async function sendPasswordResetEmail(email: string) {
   const client = requireSupabaseBrowserClient();
+
+  window.localStorage.setItem(PASSWORD_RECOVERY_STORAGE_KEY, "pending");
 
   const { error } = await client.auth.resetPasswordForEmail(normalizeEmail(email), {
     redirectTo: getPasswordResetRedirectUrl()
@@ -193,6 +207,7 @@ export async function setCurrentUserPassword(password: string) {
     return { user: data.user, error };
   }
 
+  clearPasswordRecoveryMarker();
   const { error: profileError } = await ensureCurrentUserProfile();
 
   return {
@@ -207,5 +222,6 @@ export async function signOutUser() {
     return;
   }
 
+  clearPasswordRecoveryMarker();
   await client.auth.signOut();
 }

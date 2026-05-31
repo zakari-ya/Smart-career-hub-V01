@@ -52,7 +52,7 @@ export const protectedRoutes: RouteObject[] = [
       },
       {
         path: "set-password",
-        element: withSuspense(<SetPasswordPage />)
+        element: withSuspense(<SetPasswordPage mode="dashboard" />)
       }
     ]
   }

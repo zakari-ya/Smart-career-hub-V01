@@ -4,6 +4,7 @@ import { createContext, useCallback, useEffect, useMemo, useState } from "react"
 
 import type { AuthContextValue } from "@/features/auth/types";
 import { signOutUser } from "@/features/auth/api/auth-client";
+import { PASSWORD_RECOVERY_STORAGE_KEY } from "@/features/auth/constants";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/env";
 
@@ -48,7 +49,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     const {
       data: { subscription }
-    } = client.auth.onAuthStateChange((_event, nextSession) => {
+    } = client.auth.onAuthStateChange((event, nextSession) => {
+      if (event === "PASSWORD_RECOVERY") {
+        window.localStorage.setItem(PASSWORD_RECOVERY_STORAGE_KEY, "active");
+      }
+
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
       setLoading(false);
