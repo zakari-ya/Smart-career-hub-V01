@@ -1,14 +1,16 @@
 import { PolarAngleAxis, PolarGrid, Radar, RadarChart, ResponsiveContainer, Tooltip } from "recharts";
 
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import type { ResumeAnalysis } from "@/features/analysis/types";
+import type { ResumeAnalysisV2 } from "@/features/analysis/types";
 
-export function ScoreBreakdownChart({ analysis }: { analysis: ResumeAnalysis }) {
+export function ScoreBreakdownChart({ analysis }: { analysis: ResumeAnalysisV2 }) {
   const data = [
-    { metric: "Overall", value: analysis.overallScore },
-    { metric: "ATS", value: analysis.atsScore },
-    { metric: "Keywords", value: analysis.keywordScore },
-    { metric: "Impact", value: analysis.impactScore }
+    { metric: "Overall", value: analysis.result.scores.overall },
+    { metric: "ATS", value: analysis.result.scores.ats },
+    { metric: "Structure", value: analysis.result.scores.structure },
+    { metric: "Content", value: analysis.result.scores.content },
+    { metric: "Impact", value: analysis.result.scores.impact },
+    { metric: "Keywords", value: analysis.result.scores.keywords }
   ];
 
   return (

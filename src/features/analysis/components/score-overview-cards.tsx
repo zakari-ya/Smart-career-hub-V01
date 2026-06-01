@@ -2,37 +2,37 @@ import { ArrowUpRight, BriefcaseBusiness, SearchCheck, Sparkles, TrendingUp } fr
 
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { formatScore } from "@/lib/utils";
-import type { ResumeAnalysis } from "@/features/analysis/types";
+import type { ResumeAnalysisV2 } from "@/features/analysis/types";
 
 const cardMeta = [
   {
-    key: "overallScore",
+    key: "overall",
     label: "Overall score",
     icon: TrendingUp
   },
   {
-    key: "atsScore",
+    key: "ats",
     label: "ATS score",
     icon: SearchCheck
   },
   {
-    key: "keywordScore",
-    label: "Keyword score",
+    key: "structure",
+    label: "Structure score",
     icon: Sparkles
   },
   {
-    key: "impactScore",
+    key: "impact",
     label: "Impact score",
     icon: BriefcaseBusiness
   }
 ] as const;
 
-export function ScoreOverviewCards({ analysis }: { analysis: ResumeAnalysis }) {
+export function ScoreOverviewCards({ analysis }: { analysis: ResumeAnalysisV2 }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {cardMeta.map((item) => {
         const Icon = item.icon;
-        const score = analysis[item.key];
+        const score = analysis.result.scores[item.key];
 
         return (
           <Card key={item.key} className="group overflow-hidden">

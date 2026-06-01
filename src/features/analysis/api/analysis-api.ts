@@ -1,42 +1,60 @@
 import { requireSupabaseBrowserClient } from "@/lib/supabase/client";
 import { invokeEdgeFunction } from "@/lib/supabase/functions";
-import { resumeAnalysisSchema } from "@/features/analysis/schemas/resume-analysis-schema";
-import type { DashboardOverview, ResumeAnalysis } from "@/features/analysis/types";
+import {
+  analysisResultSchema,
+  resumeAnalysisSchema
+} from "@/features/analysis/schemas/resume-analysis-schema";
+import type { AnalysisResult, DashboardOverview, ResumeAnalysis } from "@/features/analysis/types";
 
-const emptyAnalysisResult = {
-  summary: "",
-  strengths: [],
-  weaknesses: [],
-  suggestions: [],
-  optimizedSummary: "",
-  keywordImprovements: {
-    missing: [],
-    recommended: [],
-    found: []
-  },
-  actionPlan: []
-} as const;
+function getRawResult(row: Record<string, unknown>) {
+  return row.result && typeof row.result === "object" && !Array.isArray(row.result)
+    ? (row.result as Record<string, unknown>)
+    : null;
+}
 
-function mapAnalysisRow(row: Record<string, unknown>): ResumeAnalysis {
-  const rawResult =
-    row.result && typeof row.result === "object" && !Array.isArray(row.result)
-      ? (row.result as Record<string, unknown>)
-      : null;
-
-  return resumeAnalysisSchema.parse({
+function getBaseAnalysis(row: Record<string, unknown>) {
+  return {
     id: String(row.id ?? crypto.randomUUID()),
     resumeId: String(row.resume_id ?? ""),
     provider: String(row.provider ?? "openrouter"),
     model: String(row.model ?? "unknown"),
     status: row.status === "failed" ? "failed" : row.status === "pending" ? "pending" : "completed",
     createdAt: String(row.created_at ?? new Date().toISOString()),
-    overallScore: Number(row.overall_score ?? rawResult?.overallScore ?? 0),
-    atsScore: Number(row.ats_score ?? rawResult?.atsScore ?? 0),
-    keywordScore: Number(row.keyword_score ?? rawResult?.keywordScore ?? 0),
-    impactScore: Number(row.impact_score ?? rawResult?.impactScore ?? 0),
-    ...emptyAnalysisResult,
-    ...(rawResult ?? {}),
     failureReason: typeof row.failure_reason === "string" ? row.failure_reason : null
+  } as const;
+}
+
+function parseV2Result(row: Record<string, unknown>): AnalysisResult | null {
+  const rawResult = getRawResult(row);
+
+  if (!rawResult) {
+    return null;
+  }
+
+  const parsed = analysisResultSchema.safeParse(rawResult);
+
+  return parsed.success ? parsed.data : null;
+}
+
+function mapAnalysisRow(row: Record<string, unknown>): ResumeAnalysis {
+  const base = getBaseAnalysis(row);
+  const result = parseV2Result(row);
+
+  if (result) {
+    return resumeAnalysisSchema.parse({
+      ...base,
+      schemaVersion: "v2",
+      result
+    });
+  }
+
+  return resumeAnalysisSchema.parse({
+    ...base,
+    schemaVersion: "legacy",
+    legacyMessage:
+      base.status === "completed"
+        ? "This report was created before the upgraded resume analyzer. Re-run your resume to see the new coaching dashboard."
+        : "This analysis does not have an upgraded result yet."
   });
 }
 
@@ -87,7 +105,7 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
   const [recentAnalysesResponse, resumesCountResponse, completedAnalysesResponse] = await Promise.all([
     client.from("analyses").select("*").order("created_at", { ascending: false }).limit(12),
     client.from("resumes").select("id", { count: "exact", head: true }),
-    client.from("analyses").select("overall_score").eq("status", "completed")
+    client.from("analyses").select("result").eq("status", "completed")
   ]);
 
   if (recentAnalysesResponse.error) {
@@ -106,8 +124,8 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
     mapAnalysisRow(row as Record<string, unknown>)
   );
   const completedScores = (completedAnalysesResponse.data ?? [])
-    .map((row) => Number(row.overall_score ?? 0))
-    .filter((score) => Number.isFinite(score));
+    .map((row) => parseV2Result(row as Record<string, unknown>)?.scores.overall)
+    .filter((score): score is number => Number.isFinite(score));
 
   const averageScore = completedScores.length
     ? Math.round(completedScores.reduce((sum, score) => sum + score, 0) / completedScores.length)

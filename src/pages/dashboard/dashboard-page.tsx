@@ -32,7 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ResumeAnalysis } from "@/features/analysis/types";
+import { hasV2Result, type ResumeAnalysis } from "@/features/analysis/types";
 import { useDashboardOverview } from "@/features/analysis/hooks/use-dashboard-overview";
 import { formatRelativeDate, formatScore } from "@/lib/utils";
 
@@ -84,32 +84,40 @@ export function DashboardPage() {
   }
 
   const latestAnalysis = data.latestAnalysis;
-  const completedAnalyses = data.recentAnalyses.filter((analysis) => analysis.status === "completed");
+  const latestV2Analysis = hasV2Result(latestAnalysis) ? latestAnalysis : null;
+  const completedAnalyses = data.recentAnalyses.filter(hasV2Result);
   const bestScore = completedAnalyses.reduce(
-    (best, analysis) => Math.max(best, analysis.overallScore),
-    completedAnalyses.length ? completedAnalyses[0]?.overallScore ?? 0 : 0
+    (best, analysis) => Math.max(best, analysis.result.scores.overall),
+    completedAnalyses.length ? completedAnalyses[0]?.result.scores.overall ?? 0 : 0
   );
-  const latestAction = latestAnalysis?.actionPlan[0]?.task ?? "Upload a resume to generate your first action plan.";
-  const highPriorityActions = latestAnalysis?.actionPlan.filter((action) => action.priority === "high").length ?? 0;
+  const latestAction = latestV2Analysis?.result.actionPlan[0]?.task ?? "Upload a resume to generate your first action plan.";
+  const highPriorityActions =
+    latestV2Analysis?.result.actionPlan.filter((action) => action.priority === "high").length ?? 0;
   const statusData = buildStatusData(data.recentAnalyses);
   const trendData = [...completedAnalyses]
     .reverse()
     .slice(-8)
     .map((analysis, index) => ({
       label: `R${index + 1}`,
-      overall: Math.round(analysis.overallScore),
-      ats: Math.round(analysis.atsScore),
-      keywords: Math.round(analysis.keywordScore),
-      impact: Math.round(analysis.impactScore)
+      overall: Math.round(analysis.result.scores.overall),
+      ats: Math.round(analysis.result.scores.ats),
+      structure: Math.round(analysis.result.scores.structure),
+      impact: Math.round(analysis.result.scores.impact)
     }));
-  const latestScoreBars = latestAnalysis
+  const latestScoreBars = latestV2Analysis
     ? [
-        { label: "Overall", value: latestAnalysis.overallScore },
-        { label: "ATS", value: latestAnalysis.atsScore },
-        { label: "Keywords", value: latestAnalysis.keywordScore },
-        { label: "Impact", value: latestAnalysis.impactScore }
+        { label: "Overall", value: latestV2Analysis.result.scores.overall },
+        { label: "ATS", value: latestV2Analysis.result.scores.ats },
+        { label: "Structure", value: latestV2Analysis.result.scores.structure },
+        { label: "Impact", value: latestV2Analysis.result.scores.impact },
+        { label: "Keywords", value: latestV2Analysis.result.scores.keywords }
       ]
     : [];
+  const heroCopy = latestV2Analysis
+    ? latestV2Analysis.result.verdict.message
+    : latestAnalysis?.schemaVersion === "legacy"
+      ? latestAnalysis.legacyMessage
+      : "Your first upload creates real scores, charts, and a short action plan.";
 
   return (
     <div className="grid gap-4">
@@ -118,15 +126,13 @@ export function DashboardPage() {
           <div className="absolute right-[-8%] top-[-26%] h-56 w-56 rounded-full bg-[rgba(18,183,166,0.18)] blur-[58px]" />
           <div className="relative z-10">
             <Badge className="w-fit border-white/10 bg-white/10 text-white/84">
-              {latestAnalysis ? "Live analytics" : "Workspace ready"}
+              {latestV2Analysis ? "Live analytics" : latestAnalysis ? "Upgrade ready" : "Workspace ready"}
             </Badge>
             <h2 className="mt-4 max-w-2xl font-[var(--font-heading)] text-4xl font-semibold leading-[0.98] tracking-[-0.045em] text-white sm:text-5xl">
-              {latestAnalysis ? "Resume signal at a glance." : "Upload once. See the dashboard."}
+              {latestV2Analysis ? "Resume signal at a glance." : latestAnalysis ? "Re-run for the upgraded report." : "Upload once. See the dashboard."}
             </h2>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-white/68">
-              {latestAnalysis
-                ? compactText(latestAnalysis.summary, 150)
-                : "Your first upload creates real scores, charts, and a short action plan."}
+              {compactText(heroCopy, 150)}
             </p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <Button asChild variant="teal" className="group">
@@ -187,7 +193,9 @@ export function DashboardPage() {
             <p className="mt-4 text-sm leading-7 text-[var(--color-graphite-700)]">
               {latestAnalysis?.status === "failed"
                 ? latestAnalysis.failureReason ?? "The last run failed safely. Upload again or retry analysis."
-                : compactText(latestAction, 170)}
+                : latestAnalysis?.schemaVersion === "legacy"
+                  ? compactText(latestAnalysis.legacyMessage, 170)
+                  : compactText(latestAction, 170)}
             </p>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -286,7 +294,7 @@ function AnalyticsCard({
   );
 }
 
-function TrendChart({ data }: { data: Array<{ ats: number; impact: number; keywords: number; label: string; overall: number }> }) {
+function TrendChart({ data }: { data: Array<{ ats: number; impact: number; label: string; overall: number; structure: number }> }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data} margin={{ left: -16, right: 4, top: 10, bottom: 0 }}>
@@ -296,6 +304,7 @@ function TrendChart({ data }: { data: Array<{ ats: number; impact: number; keywo
         <Tooltip />
         <Area type="monotone" dataKey="overall" stroke={scoreColor} fill="rgba(18,183,166,0.16)" strokeWidth={3} />
         <Area type="monotone" dataKey="impact" stroke="#0f1720" fill="rgba(15,23,32,0.05)" strokeWidth={2} />
+        <Area type="monotone" dataKey="structure" stroke="#64748b" fill="rgba(100,116,139,0.05)" strokeWidth={2} />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -355,8 +364,10 @@ function ChartEmptyState({ text }: { text: string }) {
 
 function RecentAnalysisRow({ analysis }: { analysis: ResumeAnalysis }) {
   const scoreText =
-    analysis.status === "completed"
-      ? formatScore(analysis.overallScore)
+    hasV2Result(analysis)
+      ? formatScore(analysis.result.scores.overall)
+      : analysis.status === "completed"
+        ? "Re-run"
       : analysis.status === "pending"
         ? "Running"
         : "Failed";

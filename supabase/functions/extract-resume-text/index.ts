@@ -95,13 +95,16 @@ Deno.serve(async (request) => {
     }
 
     let extractedText = "";
+    let layoutMetadata = {};
 
     try {
-      extractedText = await extractTextFromBuffer(
+      const extraction = await extractTextFromBuffer(
         await fileData.arrayBuffer(),
         fileType,
         fileName
       );
+      extractedText = extraction.text;
+      layoutMetadata = extraction.layoutMetadata;
     } catch (error) {
       const reason =
         error instanceof Error ? error.message : "We could not parse the resume text.";
@@ -119,6 +122,7 @@ Deno.serve(async (request) => {
       .from("resumes")
       .update({
         extracted_text: extractedText,
+        layout_metadata: layoutMetadata,
         extraction_status: "completed",
         extraction_error: null
       })
@@ -133,7 +137,8 @@ Deno.serve(async (request) => {
       metadata: {
         fileType,
         mimeType: resume.mime_type,
-        extractedCharacters: extractedText.length
+        extractedCharacters: extractedText.length,
+        layoutMetadata
       }
     });
 
@@ -141,6 +146,7 @@ Deno.serve(async (request) => {
       resumeId,
       extractionStatus: "completed",
       extractedTextLength: extractedText.length,
+      layoutMetadata,
       preview: extractedText.slice(0, 240)
     });
   } catch (error) {

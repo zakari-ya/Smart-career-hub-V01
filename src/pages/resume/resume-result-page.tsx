@@ -5,44 +5,54 @@ import {
   Copy,
   FileSearch,
   Gauge,
+  Github,
+  Globe2,
+  LayoutDashboard,
   Lightbulb,
+  Linkedin,
   LoaderCircle,
+  Mail,
+  Phone,
+  RefreshCw,
   SearchCheck,
-  Sparkles,
   Target,
   TrendingUp
 } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
 import { EmptyState } from "@/components/shared/empty-state";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScoreBreakdownChart } from "@/features/analysis/components/score-breakdown-chart";
 import { useResumeAnalysis } from "@/features/analysis/hooks/use-resume-analysis";
-import type { ResumeAnalysis } from "@/features/analysis/types";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { hasV2Result, type ResumeAnalysisV2 } from "@/features/analysis/types";
 import { formatScore } from "@/lib/utils";
 
 const scoreCards = [
-  { key: "overallScore", label: "Overall", icon: Gauge },
-  { key: "atsScore", label: "ATS", icon: SearchCheck },
-  { key: "keywordScore", label: "Keywords", icon: Sparkles },
-  { key: "impactScore", label: "Impact", icon: TrendingUp }
+  { key: "overall", label: "Overall", icon: Gauge },
+  { key: "ats", label: "ATS", icon: SearchCheck },
+  { key: "structure", label: "Structure", icon: LayoutDashboard },
+  { key: "impact", label: "Impact", icon: TrendingUp }
 ] as const;
 
 function getScoreTone(score: number) {
-  if (score >= 85) {
-    return "Strong";
+  if (score >= 90) {
+    return "Excellent";
   }
 
-  if (score >= 70) {
-    return "Close";
+  if (score >= 75) {
+    return "Good";
   }
 
-  return "Needs work";
+  if (score >= 60) {
+    return "Needs focus";
+  }
+
+  return "At risk";
 }
 
 function getPriorityClass(priority: "high" | "medium" | "low") {
@@ -57,12 +67,16 @@ function getPriorityClass(priority: "high" | "medium" | "low") {
   return "border-[rgba(18,183,166,0.24)] bg-[rgba(18,183,166,0.08)] text-[var(--color-teal-500)]";
 }
 
-function MiniScoreGrid({ analysis }: { analysis: ResumeAnalysis }) {
+function formatEnum(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function MiniScoreGrid({ analysis }: { analysis: ResumeAnalysisV2 }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {scoreCards.map((item) => {
         const Icon = item.icon;
-        const score = analysis[item.key];
+        const score = analysis.result.scores[item.key];
 
         return (
           <div key={item.key} className="rounded-[24px] border border-black/6 bg-white/76 p-4">
@@ -147,6 +161,131 @@ function KeywordPillGroup({ label, items }: { label: string; items: string[] }) 
   );
 }
 
+function ContactCheckCard({ analysis }: { analysis: ResumeAnalysisV2 }) {
+  const contactItems = [
+    { label: "Email", value: analysis.result.contactCheck.hasEmail, icon: Mail },
+    { label: "Phone", value: analysis.result.contactCheck.hasPhone, icon: Phone },
+    { label: "LinkedIn", value: analysis.result.contactCheck.hasLinkedIn, icon: Linkedin },
+    { label: "GitHub", value: analysis.result.contactCheck.hasGithub, icon: Github },
+    { label: "Portfolio", value: analysis.result.contactCheck.hasPortfolio, icon: Globe2 }
+  ];
+
+  return (
+    <Card className="rounded-[30px]">
+      <CardDescription>Contact check</CardDescription>
+      <CardTitle className="mt-2">Can recruiters reach you fast?</CardTitle>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        {contactItems.map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <div key={item.label} className="flex items-center gap-3 rounded-[20px] border border-black/6 bg-white/74 p-4">
+              <div className={`flex h-10 w-10 items-center justify-center rounded-2xl ${item.value ? "bg-[rgba(19,135,93,0.12)] text-[var(--color-success-500)]" : "bg-[rgba(220,74,52,0.08)] text-[var(--color-danger-500)]"}`}>
+                <Icon className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[var(--color-graphite-950)]">{item.label}</p>
+                <p className="text-xs text-[var(--color-graphite-700)]">{item.value ? "Detected" : "Missing"}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {analysis.result.contactCheck.missingContactItems.length ? (
+        <div className="mt-4 rounded-[22px] border border-[rgba(209,140,58,0.2)] bg-[rgba(209,140,58,0.08)] p-4 text-sm leading-6 text-[var(--color-warning-500)]">
+          Add: {analysis.result.contactCheck.missingContactItems.join(", ")}.
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function StructureCheckCard({ analysis }: { analysis: ResumeAnalysisV2 }) {
+  return (
+    <Card className="rounded-[30px]">
+      <CardDescription>Structure and ATS</CardDescription>
+      <CardTitle className="mt-2">Parsing risk before recruiters read it</CardTitle>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-[22px] border border-black/6 bg-white/74 p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--color-graphite-700)]">Layout</p>
+          <p className="mt-2 font-[var(--font-heading)] text-2xl font-semibold capitalize text-[var(--color-graphite-950)]">
+            {formatEnum(analysis.result.structureCheck.layoutType)}
+          </p>
+        </div>
+        <div className="rounded-[22px] border border-black/6 bg-white/74 p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--color-graphite-700)]">ATS risk</p>
+          <p className="mt-2 font-[var(--font-heading)] text-2xl font-semibold capitalize text-[var(--color-graphite-950)]">
+            {analysis.result.structureCheck.atsRiskLevel}
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <KeywordPillGroup label="Detected sections" items={analysis.result.structureCheck.detectedSections} />
+        <KeywordPillGroup label="Missing sections" items={analysis.result.structureCheck.missingSections} />
+      </div>
+      {analysis.result.structureCheck.layoutWarnings.length ? (
+        <div className="mt-4">
+          <InsightList
+            items={analysis.result.structureCheck.layoutWarnings}
+            icon={AlertTriangle}
+            tone="warning"
+            emptyCopy="No layout warnings were detected."
+          />
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function BulletQualityCard({ analysis }: { analysis: ResumeAnalysisV2 }) {
+  return (
+    <Card className="rounded-[30px]">
+      <CardDescription>Bullet quality</CardDescription>
+      <CardTitle className="mt-2">Are your bullets clear and measurable?</CardTitle>
+      <div className="mt-5 rounded-[22px] border border-black/6 bg-[var(--color-surface-100)] p-5">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-[var(--color-graphite-950)]">Bullet score</p>
+            <p className="mt-1 text-xs text-[var(--color-graphite-700)]">XYZ formula and scan quality</p>
+          </div>
+          <p className="font-[var(--font-heading)] text-4xl font-semibold text-[var(--color-graphite-950)]">
+            {formatScore(analysis.result.bulletQuality.score)}
+          </p>
+        </div>
+        <Progress className="mt-4" value={analysis.result.bulletQuality.score} />
+        <p className="mt-4 text-sm leading-6 text-[var(--color-graphite-700)]">
+          {analysis.result.bulletQuality.xyzGuidance}
+        </p>
+      </div>
+
+      {analysis.result.bulletQuality.tooLongBullets.length ? (
+        <div className="mt-5">
+          <InsightList
+            items={analysis.result.bulletQuality.tooLongBullets}
+            icon={AlertTriangle}
+            tone="warning"
+            emptyCopy="No long bullets were flagged."
+          />
+        </div>
+      ) : null}
+
+      {analysis.result.bulletQuality.weakBullets.length ? (
+        <div className="mt-5 grid gap-3">
+          {analysis.result.bulletQuality.weakBullets.map((bullet) => (
+            <div key={`${bullet.original}-${bullet.problem}`} className="rounded-[22px] border border-black/6 bg-white/74 p-4">
+              <Badge className="w-fit">{bullet.missingPart === "none" ? "Close" : `Missing ${bullet.missingPart}`}</Badge>
+              <p className="mt-3 text-sm font-semibold leading-6 text-[var(--color-graphite-950)]">{bullet.problem}</p>
+              <p className="mt-3 rounded-2xl bg-[var(--color-surface-100)] p-3 text-sm leading-6 text-[var(--color-graphite-700)]">
+                {bullet.improvedVersion}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
 export function ResumeResultPage() {
   const { analysisId = "latest" } = useParams();
   const { data: analysis, error, isLoading } = useResumeAnalysis(analysisId);
@@ -221,32 +360,47 @@ export function ResumeResultPage() {
     );
   }
 
+  if (!hasV2Result(analysis)) {
+    return (
+      <Card className="rounded-[34px]">
+        <div className="flex h-14 w-14 items-center justify-center rounded-[22px] bg-[var(--color-surface-200)] text-[var(--color-graphite-950)]">
+          <RefreshCw className="h-6 w-6" />
+        </div>
+        <CardDescription className="mt-6">Upgraded analyzer available</CardDescription>
+        <CardTitle className="mt-2">Re-run your resume to see the professional report</CardTitle>
+        <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--color-graphite-700)]">
+          {analysis.legacyMessage}
+        </p>
+        <div className="mt-6">
+          <Button asChild variant="teal">
+            <Link to="/dashboard/resume/upload">Upload resume again</Link>
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <div className="grid gap-5">
       <section className="overflow-hidden rounded-[34px] border border-black/6 bg-[linear-gradient(135deg,#101820_0%,#17323a_58%,#0fb8a7_150%)] text-white shadow-[0_24px_80px_rgba(15,23,32,0.14)]">
-        <div className="grid gap-6 p-5 sm:p-6 xl:grid-cols-[1.1fr_0.9fr] xl:p-7">
+        <div className="grid gap-6 p-5 sm:p-6 xl:grid-cols-[1.08fr_0.92fr] xl:p-7">
           <div className="flex min-h-[320px] flex-col justify-between">
             <div>
-              <Badge className="border-white/10 bg-white/8 text-white/78">Resume review</Badge>
+              <Badge className="border-white/10 bg-white/8 text-white/78">{analysis.result.verdict.label}</Badge>
               <h1 className="mt-5 max-w-3xl font-[var(--font-heading)] text-4xl font-semibold leading-tight text-white sm:text-5xl">
-                Your resume is at {formatScore(analysis.overallScore)}. Here is the fastest path to make it stronger.
+                Your resume scores {formatScore(analysis.result.scores.overall)}. Here is what to fix first.
               </h1>
               <p className="mt-5 max-w-2xl text-sm leading-7 text-white/74 sm:text-base">
-                {analysis.summary}
+                {analysis.result.verdict.message}
               </p>
             </div>
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
-              {analysis.actionPlan.slice(0, 3).map((step, index) => (
-                <div key={`${step.priority}-${step.task}`} className="rounded-[22px] border border-white/10 bg-white/8 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-white/58">
-                      Step 0{index + 1}
-                    </span>
-                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold uppercase text-white/72">
-                      {step.priority}
-                    </span>
-                  </div>
-                  <p className="mt-3 text-sm font-semibold leading-6 text-white">{step.task}</p>
+              {analysis.result.quickWins.slice(0, 3).map((item, index) => (
+                <div key={item} className="rounded-[22px] border border-white/10 bg-white/8 p-4">
+                  <span className="text-xs font-semibold uppercase tracking-[0.14em] text-white/58">
+                    Win 0{index + 1}
+                  </span>
+                  <p className="mt-3 text-sm font-semibold leading-6 text-white">{item}</p>
                 </div>
               ))}
             </div>
@@ -255,9 +409,9 @@ export function ResumeResultPage() {
           <div className="rounded-[28px] border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm font-medium text-white/62">Score diagnosis</p>
+                <p className="text-sm font-medium text-white/62">Career signal</p>
                 <p className="mt-1 font-[var(--font-heading)] text-5xl font-semibold text-white">
-                  {formatScore(analysis.overallScore)}
+                  {formatScore(analysis.result.scores.overall)}
                 </p>
               </div>
               <div className="flex h-16 w-16 items-center justify-center rounded-[24px] bg-[var(--color-teal-500)] text-[var(--color-graphite-950)]">
@@ -266,7 +420,7 @@ export function ResumeResultPage() {
             </div>
             <div className="mt-6 grid gap-3">
               {scoreCards.slice(1).map((item) => {
-                const score = analysis[item.key];
+                const score = analysis.result.scores[item.key];
                 return (
                   <div key={item.key} className="rounded-[20px] border border-white/10 bg-white/[0.08] p-4">
                     <div className="mb-3 flex items-center justify-between text-sm">
@@ -296,10 +450,10 @@ export function ResumeResultPage() {
           <CardDescription>Rewrite-ready summary</CardDescription>
           <CardTitle className="mt-2">A stronger opening you can adapt</CardTitle>
           <div className="mt-5 rounded-[24px] border border-black/6 bg-[var(--color-surface-100)] p-5 text-sm leading-7 text-[var(--color-graphite-700)]">
-            {analysis.optimizedSummary}
+            {analysis.result.optimizedSummary}
           </div>
           <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-            <Button variant="secondary" onClick={() => void navigator.clipboard.writeText(analysis.optimizedSummary)}>
+            <Button variant="secondary" onClick={() => void navigator.clipboard.writeText(analysis.result.optimizedSummary)}>
               <Copy className="mr-2 h-4 w-4" />
               Copy summary
             </Button>
@@ -311,6 +465,11 @@ export function ResumeResultPage() {
             </Button>
           </div>
         </Card>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-2">
+        <ContactCheckCard analysis={analysis} />
+        <StructureCheckCard analysis={analysis} />
       </section>
 
       <Tabs defaultValue="fixes" className="grid gap-5">
@@ -326,6 +485,7 @@ export function ResumeResultPage() {
           <TabsList className="w-full overflow-x-auto sm:w-auto">
             <TabsTrigger value="fixes">Fix first</TabsTrigger>
             <TabsTrigger value="signals">Signals</TabsTrigger>
+            <TabsTrigger value="bullets">Bullets</TabsTrigger>
             <TabsTrigger value="keywords">Keywords</TabsTrigger>
           </TabsList>
         </div>
@@ -336,7 +496,7 @@ export function ResumeResultPage() {
               <CardDescription>Priority queue</CardDescription>
               <CardTitle className="mt-2">What you should improve first</CardTitle>
               <div className="mt-5 grid gap-3">
-                {analysis.actionPlan.map((step, index) => (
+                {analysis.result.actionPlan.map((step, index) => (
                   <div key={`${step.priority}-${step.task}`} className="rounded-[22px] border border-black/6 bg-white/74 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <p className="text-sm font-semibold leading-6 text-[var(--color-graphite-950)]">
@@ -356,7 +516,7 @@ export function ResumeResultPage() {
               <CardTitle className="mt-2">Practical edits that raise quality</CardTitle>
               <div className="mt-5">
                 <InsightList
-                  items={analysis.suggestions}
+                  items={analysis.result.suggestions}
                   icon={Lightbulb}
                   tone="idea"
                   emptyCopy="Suggestions will appear here after analysis."
@@ -373,7 +533,7 @@ export function ResumeResultPage() {
               <CardTitle className="mt-2">What is already working</CardTitle>
               <div className="mt-5">
                 <InsightList
-                  items={analysis.strengths}
+                  items={analysis.result.strengths}
                   icon={CheckCircle2}
                   tone="good"
                   emptyCopy="Strengths will appear here after analysis."
@@ -385,7 +545,7 @@ export function ResumeResultPage() {
               <CardTitle className="mt-2">Where recruiters may hesitate</CardTitle>
               <div className="mt-5">
                 <InsightList
-                  items={analysis.weaknesses}
+                  items={analysis.result.weaknesses}
                   icon={AlertTriangle}
                   tone="warning"
                   emptyCopy="Weaknesses will appear here after analysis."
@@ -395,11 +555,15 @@ export function ResumeResultPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="bullets">
+          <BulletQualityCard analysis={analysis} />
+        </TabsContent>
+
         <TabsContent value="keywords">
           <div className="grid gap-5 xl:grid-cols-3">
-            <KeywordPillGroup label="Missing" items={analysis.keywordImprovements.missing} />
-            <KeywordPillGroup label="Recommended" items={analysis.keywordImprovements.recommended} />
-            <KeywordPillGroup label="Already found" items={analysis.keywordImprovements.found} />
+            <KeywordPillGroup label="Missing" items={analysis.result.keywordImprovements.missing} />
+            <KeywordPillGroup label="Recommended" items={analysis.result.keywordImprovements.recommended} />
+            <KeywordPillGroup label="Already found" items={analysis.result.keywordImprovements.found} />
           </div>
         </TabsContent>
       </Tabs>

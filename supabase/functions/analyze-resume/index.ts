@@ -3,6 +3,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { errorResponse, jsonResponse } from "../_shared/errors.ts";
 import { analyzeResumeWithOpenRouter } from "../_shared/openrouter.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
+import { analyzeResumeStructure } from "../_shared/resume-pre-analysis.ts";
 import { parseRequestBody, resumeActionSchema } from "../_shared/validators.ts";
 
 Deno.serve(async (request) => {
@@ -19,7 +20,7 @@ Deno.serve(async (request) => {
 
     const { data: resume, error: resumeError } = await supabase
       .from("resumes")
-      .select("id, user_id, extracted_text, extraction_status")
+      .select("id, user_id, extracted_text, extraction_status, layout_metadata")
       .eq("id", resumeId)
       .eq("user_id", user.id)
       .single();
@@ -68,7 +69,16 @@ Deno.serve(async (request) => {
     }
 
     try {
-      const { result, model } = await analyzeResumeWithOpenRouter(resume.extracted_text);
+      const preAnalysis = analyzeResumeStructure(
+        resume.extracted_text,
+        resume.layout_metadata && typeof resume.layout_metadata === "object"
+          ? resume.layout_metadata
+          : null
+      );
+      const { result, model } = await analyzeResumeWithOpenRouter(
+        resume.extracted_text,
+        preAnalysis
+      );
 
       const { data: analysisRow, error: analysisError } = await supabase
         .from("analyses")
@@ -76,10 +86,10 @@ Deno.serve(async (request) => {
           model,
           status: "completed",
           result,
-          overall_score: result.overallScore,
-          ats_score: result.atsScore,
-          keyword_score: result.keywordScore,
-          impact_score: result.impactScore,
+          overall_score: Math.round(result.scores.overall),
+          ats_score: Math.round(result.scores.ats),
+          keyword_score: Math.round(result.scores.keywords),
+          impact_score: Math.round(result.scores.impact),
           failure_reason: null
         })
         .eq("id", pendingAnalysis.id)
@@ -98,11 +108,14 @@ Deno.serve(async (request) => {
         metadata: {
           resumeId: resume.id,
           model,
+          preAnalysis,
           scores: {
-            overall: result.overallScore,
-            ats: result.atsScore,
-            keyword: result.keywordScore,
-            impact: result.impactScore
+            overall: result.scores.overall,
+            ats: result.scores.ats,
+            structure: result.scores.structure,
+            content: result.scores.content,
+            impact: result.scores.impact,
+            keywords: result.scores.keywords
           }
         }
       });
@@ -114,10 +127,10 @@ Deno.serve(async (request) => {
         model: analysisRow.model,
         status: analysisRow.status,
         result: analysisRow.result,
-        overallScore: analysisRow.overall_score,
-        atsScore: analysisRow.ats_score,
-        keywordScore: analysisRow.keyword_score,
-        impactScore: analysisRow.impact_score,
+        overallScore: result.scores.overall,
+        atsScore: result.scores.ats,
+        keywordScore: result.scores.keywords,
+        impactScore: result.scores.impact,
         failureReason: analysisRow.failure_reason,
         createdAt: analysisRow.created_at,
         updatedAt: analysisRow.updated_at
