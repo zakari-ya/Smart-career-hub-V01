@@ -10,7 +10,8 @@ export function useUploadResume() {
     onSettled: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] }),
-        queryClient.invalidateQueries({ queryKey: ["resumes"] })
+        queryClient.invalidateQueries({ queryKey: ["resumes"] }),
+        queryClient.invalidateQueries({ queryKey: ["usage-limits"] })
       ]);
     }
   });

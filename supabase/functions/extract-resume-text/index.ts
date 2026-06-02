@@ -1,6 +1,12 @@
 import { getAuthenticatedUser, createServiceClient } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-import { errorResponse, jsonResponse } from "../_shared/errors.ts";
+import {
+  createAppError,
+  errorResponse,
+  getSafeErrorMessage,
+  jsonResponse,
+  logBackendError
+} from "../_shared/errors.ts";
 import { extractTextFromBuffer } from "../_shared/pdf-extract.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { assertValidResumeFile } from "../_shared/resume-file.ts";
@@ -41,6 +47,8 @@ async function markExtractionFailure(
 }
 
 Deno.serve(async (request) => {
+  const requestId = crypto.randomUUID();
+
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -60,13 +68,22 @@ Deno.serve(async (request) => {
       .single();
 
     if (resumeError || !resume) {
-      return errorResponse("Resume not found.", 404);
+      if (resumeError) {
+        logBackendError("extract-resume-text resume lookup failed", requestId, resumeError, { resumeId });
+      }
+
+      return errorResponse(createAppError("NOT_FOUND"), requestId);
     }
 
     if (!String(resume.storage_path).startsWith(`${user.id}/`)) {
-      const reason = "Resume storage path does not match the authenticated user.";
+      const safeError = createAppError("UNAUTHORIZED");
+      const reason = getSafeErrorMessage(safeError.code);
+      logBackendError("extract-resume-text unauthorized storage path", requestId, safeError, {
+        resumeId,
+        storagePath: resume.storage_path
+      });
       await markExtractionFailure(supabase, user.id, resume.id, resume.storage_path, reason);
-      return errorResponse("Unauthorized resume storage path.", 403, { reason });
+      return errorResponse(safeError, requestId);
     }
 
     const fileName = String(resume.file_name ?? resume.title ?? "resume.txt");
@@ -79,9 +96,11 @@ Deno.serve(async (request) => {
         fileSize: Number(resume.file_size ?? 0)
       });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : "Invalid resume file.";
+      const safeError = createAppError("EXTRACTION_FAILED", { cause: error, debugDetails: error });
+      const reason = getSafeErrorMessage(safeError.code);
+      logBackendError("extract-resume-text invalid file", requestId, error, { resumeId, fileName, fileType });
       await markExtractionFailure(supabase, user.id, resume.id, resume.storage_path, reason, true);
-      return errorResponse(reason, 400);
+      return errorResponse(safeError, requestId);
     }
 
     const { data: fileData, error: fileError } = await supabase.storage
@@ -89,9 +108,11 @@ Deno.serve(async (request) => {
       .download(resume.storage_path);
 
     if (fileError || !fileData) {
-      const reason = "Unable to access the private resume file.";
+      const safeError = createAppError("EXTRACTION_FAILED", { cause: fileError, debugDetails: fileError });
+      const reason = getSafeErrorMessage(safeError.code);
+      logBackendError("extract-resume-text storage download failed", requestId, fileError, { resumeId });
       await markExtractionFailure(supabase, user.id, resume.id, resume.storage_path, reason);
-      return errorResponse(reason, 400);
+      return errorResponse(safeError, requestId);
     }
 
     let extractedText = "";
@@ -106,16 +127,19 @@ Deno.serve(async (request) => {
       extractedText = extraction.text;
       layoutMetadata = extraction.layoutMetadata;
     } catch (error) {
-      const reason =
-        error instanceof Error ? error.message : "We could not parse the resume text.";
+      const safeError = createAppError("EXTRACTION_FAILED", { cause: error, debugDetails: error });
+      const reason = getSafeErrorMessage(safeError.code);
+      logBackendError("extract-resume-text parsing failed", requestId, error, { resumeId, fileName, fileType });
       await markExtractionFailure(supabase, user.id, resume.id, resume.storage_path, reason);
-      return errorResponse("Text extraction failed.", 400, { reason });
+      return errorResponse(safeError, requestId);
     }
 
     if (!extractedText.trim()) {
-      const reason = "We could not extract readable text from this file.";
+      const safeError = createAppError("EXTRACTION_FAILED");
+      const reason = getSafeErrorMessage(safeError.code);
+      logBackendError("extract-resume-text empty text", requestId, safeError, { resumeId, fileName, fileType });
       await markExtractionFailure(supabase, user.id, resume.id, resume.storage_path, reason);
-      return errorResponse("Text extraction failed.", 400, { reason });
+      return errorResponse(safeError, requestId);
     }
 
     await supabase
@@ -150,10 +174,7 @@ Deno.serve(async (request) => {
       preview: extractedText.slice(0, 240)
     });
   } catch (error) {
-    console.error("extract-resume-text failed", error);
-    return errorResponse(
-      error instanceof Error ? error.message : "Unexpected extraction failure.",
-      400
-    );
+    logBackendError("extract-resume-text failed", requestId, error);
+    return errorResponse(error, requestId);
   }
 });

@@ -13,6 +13,7 @@ import { useUploadResume } from "@/features/resume/hooks/use-upload-resume";
 import { resumeUploadSchema, type ResumeUploadSchema } from "@/features/resume/schemas/resume-upload-schema";
 import type { UploadPhase } from "@/features/resume/types";
 import { useToast } from "@/hooks/use-toast";
+import { AppFunctionError } from "@/lib/supabase/functions";
 
 const phaseHeadlines: Record<UploadPhase, { title: string; subtitle: string }> = {
   idle: {
@@ -40,6 +41,52 @@ const phaseHeadlines: Record<UploadPhase, { title: string; subtitle: string }> =
     subtitle: "No private data was exposed. Review the error and try again."
   }
 };
+
+function getUploadErrorCopy(error: unknown) {
+  if (error instanceof AppFunctionError) {
+    const retryCopy = error.retryAfterSeconds
+      ? ` Try again in about ${Math.max(error.retryAfterSeconds, 1)} seconds.`
+      : "";
+
+    if (error.code === "DAILY_LIMIT_REACHED") {
+      return {
+        title: "Daily limit reached",
+        message: error.message
+      };
+    }
+
+    if (error.code === "AI_PROVIDER_BUSY") {
+      return {
+        title: "AI is busy",
+        message: `${error.message}${retryCopy}`
+      };
+    }
+
+    if (error.code === "EXTRACTION_FAILED") {
+      return {
+        title: "Resume could not be read",
+        message: error.message
+      };
+    }
+
+    if (error.code === "UNAUTHORIZED") {
+      return {
+        title: "Sign in again",
+        message: error.message
+      };
+    }
+
+    return {
+      title: "Analysis stopped",
+      message: error.message
+    };
+  }
+
+  return {
+    title: "Upload failed",
+    message: error instanceof Error ? error.message : "Please try again."
+  };
+}
 
 export function ResumeUploadPage() {
   const navigate = useNavigate();
@@ -79,12 +126,12 @@ export function ResumeUploadPage() {
 
       navigate(`/dashboard/analyses/${result.analysisId}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Please try again.";
+      const { message, title } = getUploadErrorCopy(error);
       setUploadPhase("failed");
       setUploadError(message);
 
       toast({
-        title: "Upload failed",
+        title,
         description: message,
         variant: "destructive"
       });

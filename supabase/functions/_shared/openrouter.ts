@@ -1,4 +1,5 @@
 import { analysisResultSchema, type AnalysisResult } from "./analysis-schema.ts";
+import { AppError, createAppError } from "./errors.ts";
 import type { ResumeStructureAnalysis } from "./resume-pre-analysis.ts";
 
 const fallbackModels = [
@@ -11,7 +12,9 @@ class OpenRouterRequestError extends Error {
   constructor(
     message: string,
     public readonly status: number,
-    public readonly model: string
+    public readonly model: string,
+    public readonly retryAfterSeconds?: number,
+    public readonly responseBody?: unknown
   ) {
     super(message);
   }
@@ -195,7 +198,9 @@ async function requestOpenRouter(prompt: string, model: string) {
   const apiKey = Deno.env.get("OPENROUTER_API_KEY");
 
   if (!apiKey) {
-    throw new Error("Missing OPENROUTER_API_KEY.");
+    throw createAppError("SERVER_CONFIG_ERROR", {
+      debugDetails: "Missing OPENROUTER_API_KEY."
+    });
   }
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -226,7 +231,32 @@ async function requestOpenRouter(prompt: string, model: string) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new OpenRouterRequestError(`OpenRouter request failed: ${errorText}`, response.status, model);
+    let responseBody: unknown = errorText;
+    let retryAfterSeconds =
+      Number(response.headers.get("Retry-After") ?? "") || undefined;
+
+    try {
+      responseBody = JSON.parse(errorText) as {
+        error?: { metadata?: { retry_after_seconds?: number; retry_after_seconds_raw?: number } };
+      };
+      const metadata = (responseBody as {
+        error?: { metadata?: { retry_after_seconds?: number; retry_after_seconds_raw?: number } };
+      }).error?.metadata;
+      retryAfterSeconds =
+        metadata?.retry_after_seconds ??
+        Math.ceil(metadata?.retry_after_seconds_raw ?? retryAfterSeconds ?? 0) ??
+        retryAfterSeconds;
+    } catch {
+      // Keep the raw text for developer logs.
+    }
+
+    throw new OpenRouterRequestError(
+      `OpenRouter request failed for ${model}`,
+      response.status,
+      model,
+      retryAfterSeconds,
+      responseBody
+    );
   }
 
   return response.json();
@@ -349,6 +379,10 @@ export async function analyzeResumeWithOpenRouter(
   const prompt = buildPrompt(resumeText.slice(0, 18_000), preAnalysis);
   const models = getConfiguredModels();
   const modelErrors: string[] = [];
+  const debugModelErrors: unknown[] = [];
+  let sawInvalidResponse = false;
+  let sawProviderBusy = false;
+  let retryAfterSeconds: number | undefined;
 
   for (const model of models) {
     try {
@@ -389,10 +423,39 @@ export async function analyzeResumeWithOpenRouter(
         };
       }
 
+      sawInvalidResponse = true;
       modelErrors.push(`${model}: invalid AI response after repair retry`);
+      debugModelErrors.push({
+        model,
+        reason: "invalid AI response after repair retry",
+        validationError: secondParse.error.message
+      });
     } catch (error) {
+      if (error instanceof AppError && error.code === "SERVER_CONFIG_ERROR") {
+        throw error;
+      }
+
       const message = error instanceof Error ? error.message : "unknown OpenRouter failure";
       modelErrors.push(`${model}: ${message}`);
+      debugModelErrors.push(
+        error instanceof OpenRouterRequestError
+          ? {
+              model: error.model,
+              status: error.status,
+              retryAfterSeconds: error.retryAfterSeconds,
+              responseBody: error.responseBody
+            }
+          : {
+              model,
+              message,
+              error
+            }
+      );
+
+      if (error instanceof OpenRouterRequestError && isRetryableOpenRouterError(error)) {
+        sawProviderBusy = true;
+        retryAfterSeconds = error.retryAfterSeconds ?? retryAfterSeconds;
+      }
 
       if (!isRetryableOpenRouterError(error)) {
         continue;
@@ -400,5 +463,29 @@ export async function analyzeResumeWithOpenRouter(
     }
   }
 
-  throw new Error(`All configured OpenRouter models failed. ${modelErrors.join(" | ")}`);
+  if (sawProviderBusy) {
+    throw createAppError("AI_PROVIDER_BUSY", {
+      debugDetails: {
+        modelErrors,
+        debugModelErrors
+      },
+      retryAfterSeconds
+    });
+  }
+
+  if (sawInvalidResponse) {
+    throw createAppError("AI_INVALID_RESPONSE", {
+      debugDetails: {
+        modelErrors,
+        debugModelErrors
+      }
+    });
+  }
+
+  throw createAppError("UNKNOWN_BACKEND_ERROR", {
+    debugDetails: {
+      modelErrors,
+      debugModelErrors
+    }
+  });
 }

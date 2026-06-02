@@ -104,6 +104,16 @@ export default defineConfig({
             return "query";
           }
 
+          if (
+            id.includes("sileo") ||
+            id.includes("/motion/") ||
+            id.includes("framer-motion") ||
+            id.includes("motion-dom") ||
+            id.includes("motion-utils")
+          ) {
+            return "sileo";
+          }
+
           if (id.includes("react-router")) {
             return "router";
           }

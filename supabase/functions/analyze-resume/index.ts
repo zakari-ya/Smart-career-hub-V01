@@ -1,12 +1,21 @@
 import { getAuthenticatedUser, createServiceClient } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-import { errorResponse, jsonResponse } from "../_shared/errors.ts";
+import {
+  createAppError,
+  errorResponse,
+  getSafeErrorMessage,
+  jsonResponse,
+  logBackendError,
+  toAppError
+} from "../_shared/errors.ts";
 import { analyzeResumeWithOpenRouter } from "../_shared/openrouter.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { analyzeResumeStructure } from "../_shared/resume-pre-analysis.ts";
 import { parseRequestBody, resumeActionSchema } from "../_shared/validators.ts";
 
 Deno.serve(async (request) => {
+  const requestId = crypto.randomUUID();
+
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -26,7 +35,11 @@ Deno.serve(async (request) => {
       .single();
 
     if (resumeError || !resume) {
-      return errorResponse("Resume not found.", 404);
+      if (resumeError) {
+        logBackendError("analyze-resume resume lookup failed", requestId, resumeError, { resumeId });
+      }
+
+      return errorResponse(createAppError("NOT_FOUND"), requestId);
     }
 
     const defaultModel =
@@ -47,12 +60,13 @@ Deno.serve(async (request) => {
       .single();
 
     if (pendingError || !pendingAnalysis) {
-      return errorResponse("Unable to create the pending analysis.", 500);
+      logBackendError("analyze-resume pending row creation failed", requestId, pendingError, { resumeId });
+      return errorResponse(createAppError("UNKNOWN_BACKEND_ERROR"), requestId);
     }
 
     if (resume.extraction_status !== "completed" || !resume.extracted_text?.trim()) {
-      const reason =
-        "Resume text is not ready for analysis. You need a successful extraction first.";
+      const safeError = createAppError("EXTRACTION_FAILED");
+      const reason = getSafeErrorMessage(safeError.code);
 
       await supabase
         .from("analyses")
@@ -62,10 +76,7 @@ Deno.serve(async (request) => {
         })
         .eq("id", pendingAnalysis.id);
 
-      return errorResponse("Resume text is not ready for analysis.", 400, {
-        analysisId: pendingAnalysis.id,
-        reason
-      });
+      return errorResponse(safeError, requestId);
     }
 
     try {
@@ -97,7 +108,11 @@ Deno.serve(async (request) => {
         .single();
 
       if (analysisError || !analysisRow) {
-        return errorResponse("Unable to save the analysis.", 500);
+        logBackendError("analyze-resume save analysis failed", requestId, analysisError, {
+          analysisId: pendingAnalysis.id,
+          resumeId
+        });
+        return errorResponse(createAppError("UNKNOWN_BACKEND_ERROR"), requestId);
       }
 
       await supabase.from("audit_logs").insert({
@@ -136,8 +151,13 @@ Deno.serve(async (request) => {
         updatedAt: analysisRow.updated_at
       });
     } catch (error) {
-      const reason =
-        error instanceof Error ? error.message : "We could not generate a valid AI analysis.";
+      const appError = toAppError(error, "AI_INVALID_RESPONSE");
+      const reason = getSafeErrorMessage(appError.code);
+
+      logBackendError("analyze-resume AI generation failed", requestId, error, {
+        analysisId: pendingAnalysis.id,
+        resumeId
+      });
 
       await supabase
         .from("analyses")
@@ -154,20 +174,16 @@ Deno.serve(async (request) => {
         resource_id: pendingAnalysis.id,
         metadata: {
           resumeId: resume.id,
+          code: appError.code,
+          requestId,
           reason
         }
       });
 
-      return errorResponse("AI analysis failed.", 400, {
-        analysisId: pendingAnalysis.id,
-        reason
-      });
+      return errorResponse(appError, requestId, "AI_INVALID_RESPONSE");
     }
   } catch (error) {
-    console.error("analyze-resume failed", error);
-    return errorResponse(
-      error instanceof Error ? error.message : "Unexpected analysis failure.",
-      400
-    );
+    logBackendError("analyze-resume failed", requestId, error);
+    return errorResponse(error, requestId);
   }
 });

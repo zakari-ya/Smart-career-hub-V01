@@ -1,8 +1,11 @@
-import { CheckCircle2, Download, MoreHorizontal, Share2, ShieldCheck, Smartphone, Sparkles } from "lucide-react";
+import { CheckCircle2, Download, Gauge, MoreHorizontal, Share2, ShieldCheck, Smartphone, Sparkles } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useUsageLimits } from "@/features/usage/hooks/use-usage-limits";
 import { usePwaInstall } from "@/hooks/use-pwa-install";
 import { useToast } from "@/hooks/use-toast";
 import { isSupabaseConfigured } from "@/lib/env";
@@ -22,6 +25,7 @@ const iosSteps = [
 export function SettingsPage() {
   const { installApp, isIos, state } = usePwaInstall();
   const { toast } = useToast();
+  const usageQuery = useUsageLimits(isSupabaseConfigured);
   const canPromptInstall = state === "installable";
   const isInstalled = state === "installed";
 
@@ -139,6 +143,12 @@ export function SettingsPage() {
           ) : null}
         </Card>
 
+        <UsageLimitCard
+          errorMessage={usageQuery.error instanceof Error ? usageQuery.error.message : undefined}
+          isLoading={usageQuery.isLoading}
+          usage={usageQuery.data}
+        />
+
         <Card>
           <div className="flex h-14 w-14 items-center justify-center rounded-[22px] bg-[var(--color-surface-200)] text-[var(--color-graphite-900)]">
             <ShieldCheck className="h-6 w-6" />
@@ -164,5 +174,76 @@ export function SettingsPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function UsageLimitCard({
+  errorMessage,
+  isLoading,
+  usage
+}: {
+  errorMessage?: string;
+  isLoading: boolean;
+  usage?: {
+    limits: {
+      analyzeResume: { limit: number; remaining: number; resetsAt: string; used: number };
+      extractResumeText: { limit: number; remaining: number; resetsAt: string; used: number };
+    };
+  };
+}) {
+  const analyze = usage?.limits.analyzeResume;
+  const extract = usage?.limits.extractResumeText;
+  const usedPercent = analyze ? Math.min(100, Math.round((analyze.used / analyze.limit) * 100)) : 0;
+  const resetLabel = analyze
+    ? new Intl.DateTimeFormat(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+        month: "short",
+        day: "numeric"
+      }).format(new Date(analyze.resetsAt))
+    : "";
+
+  return (
+    <Card>
+      <div className="flex h-14 w-14 items-center justify-center rounded-[22px] bg-[rgba(18,183,166,0.12)] text-[var(--color-teal-500)]">
+        <Gauge className="h-6 w-6" />
+      </div>
+      <CardTitle className="mt-6">AI analyses left today</CardTitle>
+      <CardDescription className="mt-3 leading-7">
+        Your daily limit protects the app from provider spikes while keeping resume reviews available.
+      </CardDescription>
+
+      {isLoading ? (
+        <div className="mt-5 grid gap-3">
+          <Skeleton className="h-10 w-28" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-20 w-full rounded-[22px]" />
+        </div>
+      ) : errorMessage ? (
+        <div className="mt-5 rounded-[22px] border border-[rgba(220,74,52,0.18)] bg-[rgba(220,74,52,0.06)] p-4 text-sm leading-6 text-[var(--color-danger-500)]">
+          {errorMessage}
+        </div>
+      ) : analyze && extract ? (
+        <>
+          <div className="mt-5 flex items-end justify-between gap-4">
+            <div>
+              <p className="font-[var(--font-heading)] text-4xl font-semibold text-[var(--color-graphite-950)]">
+                {analyze.remaining}
+              </p>
+              <p className="mt-1 text-xs font-bold uppercase tracking-[0.12em] text-[var(--color-graphite-700)]">
+                of {analyze.limit} left
+              </p>
+            </div>
+            <Badge className="w-fit">Resets {resetLabel}</Badge>
+          </div>
+          <Progress className="mt-5" value={usedPercent} />
+          <div className="mt-5 rounded-[22px] border border-black/6 bg-[var(--color-surface-100)] p-4 text-sm leading-6 text-[var(--color-graphite-700)]">
+            Extraction checks: {extract.remaining}/{extract.limit} left today. Provider-busy errors do not mean your daily quota is finished.
+          </div>
+        </>
+      ) : (
+        <Badge className="mt-5 w-fit">Backend missing</Badge>
+      )}
+    </Card>
   );
 }
