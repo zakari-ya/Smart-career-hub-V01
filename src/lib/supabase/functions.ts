@@ -53,7 +53,7 @@ function isAppErrorCode(value: unknown): value is AppErrorCode {
 }
 
 function sanitizeLegacyMessage(message: string) {
-  if (/rate.?limit|retry shortly|provider returned|429|upstream/i.test(message)) {
+  if (/rate.?limit|retry shortly|provider returned|429|502|503|504|gateway|timeout|timed out|upstream/i.test(message)) {
     return new AppFunctionError("AI_PROVIDER_BUSY");
   }
 
@@ -94,8 +94,16 @@ async function readFunctionError(error: unknown) {
           retryAfterSeconds
         });
       } catch {
+        if ([408, 429, 502, 503, 504].includes(typedError.context.status)) {
+          return new AppFunctionError("AI_PROVIDER_BUSY");
+        }
+
         return sanitizeLegacyMessage(bodyText);
       }
+    }
+
+    if ([408, 429, 502, 503, 504].includes(typedError.context.status)) {
+      return new AppFunctionError("AI_PROVIDER_BUSY");
     }
   }
 

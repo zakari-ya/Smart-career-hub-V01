@@ -8,6 +8,9 @@ const fallbackModels = [
   // "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 ];
 
+const defaultOpenRouterRequestTimeoutMs = 18_000;
+const defaultOpenRouterOverallTimeoutMs = 45_000;
+
 class OpenRouterRequestError extends Error {
   constructor(
     message: string,
@@ -18,6 +21,40 @@ class OpenRouterRequestError extends Error {
   ) {
     super(message);
   }
+}
+
+function readTimeoutEnv(name: string, fallback: number, min: number, max: number) {
+  const value = Number(Deno.env.get(name));
+
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, value));
+}
+
+function getRequestTimeoutMs(remainingBudgetMs: number) {
+  const configuredTimeout = readTimeoutEnv(
+    "OPENROUTER_REQUEST_TIMEOUT_MS",
+    defaultOpenRouterRequestTimeoutMs,
+    5_000,
+    30_000
+  );
+
+  return Math.max(1_000, Math.min(configuredTimeout, remainingBudgetMs));
+}
+
+function getOverallTimeoutMs() {
+  return readTimeoutEnv(
+    "OPENROUTER_OVERALL_TIMEOUT_MS",
+    defaultOpenRouterOverallTimeoutMs,
+    10_000,
+    50_000
+  );
+}
+
+function getRemainingBudgetMs(startedAt: number, overallTimeoutMs: number) {
+  return overallTimeoutMs - (Date.now() - startedAt);
 }
 
 function getConfiguredModels() {
@@ -194,7 +231,7 @@ ${resumeText}
   `.trim();
 }
 
-async function requestOpenRouter(prompt: string, model: string) {
+async function requestOpenRouter(prompt: string, model: string, timeoutMs: number) {
   const apiKey = Deno.env.get("OPENROUTER_API_KEY");
 
   if (!apiKey) {
@@ -203,31 +240,52 @@ async function requestOpenRouter(prompt: string, model: string) {
     });
   }
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.18,
-      max_tokens: 4200,
-      response_format: {
-        type: "json_object"
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+
+  try {
+    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
       },
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt
+      body: JSON.stringify({
+        model,
+        temperature: 0.18,
+        max_tokens: 4200,
+        response_format: {
+          type: "json_object"
         },
-        {
-          role: "user",
-          content: prompt
-        }
-      ]
-    })
-  });
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ]
+      })
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new OpenRouterRequestError(
+        `OpenRouter request timed out for ${model}`,
+        504,
+        model,
+        Math.ceil(timeoutMs / 1000),
+        { reason: "request_timeout", timeoutMs }
+      );
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -378,6 +436,8 @@ export async function analyzeResumeWithOpenRouter(
 }> {
   const prompt = buildPrompt(resumeText.slice(0, 18_000), preAnalysis);
   const models = getConfiguredModels();
+  const startedAt = Date.now();
+  const overallTimeoutMs = getOverallTimeoutMs();
   const modelErrors: string[] = [];
   const debugModelErrors: unknown[] = [];
   let sawInvalidResponse = false;
@@ -385,8 +445,21 @@ export async function analyzeResumeWithOpenRouter(
   let retryAfterSeconds: number | undefined;
 
   for (const model of models) {
+    const remainingBudgetMs = getRemainingBudgetMs(startedAt, overallTimeoutMs);
+
+    if (remainingBudgetMs <= 1_000) {
+      sawProviderBusy = true;
+      modelErrors.push(`${model}: OpenRouter analysis timed out before this model could run`);
+      debugModelErrors.push({
+        model,
+        reason: "overall_timeout",
+        overallTimeoutMs
+      });
+      break;
+    }
+
     try {
-      const firstPayload = await requestOpenRouter(prompt, model);
+      const firstPayload = await requestOpenRouter(prompt, model, getRequestTimeoutMs(remainingBudgetMs));
       const firstContent = getCompletionContent(firstPayload);
       let firstCandidate: unknown = firstContent;
       let validationError = "";
@@ -411,7 +484,20 @@ export async function analyzeResumeWithOpenRouter(
         validationError || firstParse.error.message,
         preAnalysis
       );
-      const secondPayload = await requestOpenRouter(repairPrompt, model);
+      const repairBudgetMs = getRemainingBudgetMs(startedAt, overallTimeoutMs);
+
+      if (repairBudgetMs <= 1_000) {
+        sawProviderBusy = true;
+        modelErrors.push(`${model}: OpenRouter analysis timed out before repair retry`);
+        debugModelErrors.push({
+          model,
+          reason: "overall_timeout_before_repair",
+          overallTimeoutMs
+        });
+        break;
+      }
+
+      const secondPayload = await requestOpenRouter(repairPrompt, model, getRequestTimeoutMs(repairBudgetMs));
       const secondContent = getCompletionContent(secondPayload);
       const secondCandidate = parseJsonContent(secondContent);
       const secondParse = analysisResultSchema.safeParse(secondCandidate);
