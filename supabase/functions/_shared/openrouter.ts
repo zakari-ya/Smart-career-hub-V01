@@ -4,12 +4,14 @@ import type { ResumeStructureAnalysis } from "./resume-pre-analysis.ts";
 
 const fallbackModels = [
   "qwen/qwen3-next-80b-a3b-instruct:free",
-  // "meta-llama/llama-3.3-70b-instruct:free", 
+  // "meta-llama/llama-3.3-70b-instruct:free",
   // "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 ];
 
 const defaultOpenRouterRequestTimeoutMs = 18_000;
 const defaultOpenRouterOverallTimeoutMs = 45_000;
+const defaultOpenRouterMaxTokens = 2_600;
+const defaultResumeTextMaxChars = 12_000;
 
 class OpenRouterRequestError extends Error {
   constructor(
@@ -31,6 +33,16 @@ function readTimeoutEnv(name: string, fallback: number, min: number, max: number
   }
 
   return Math.min(max, Math.max(min, value));
+}
+
+function readNumberEnv(name: string, fallback: number, min: number, max: number) {
+  const value = Number(Deno.env.get(name));
+
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function getRequestTimeoutMs(remainingBudgetMs: number) {
@@ -57,13 +69,22 @@ function getRemainingBudgetMs(startedAt: number, overallTimeoutMs: number) {
   return overallTimeoutMs - (Date.now() - startedAt);
 }
 
+function getMaxOutputTokens() {
+  return readNumberEnv("OPENROUTER_MAX_TOKENS", defaultOpenRouterMaxTokens, 1_200, 4_200);
+}
+
+function getResumeTextMaxChars() {
+  return readNumberEnv("OPENROUTER_RESUME_TEXT_MAX_CHARS", defaultResumeTextMaxChars, 6_000, 18_000);
+}
+
 function getConfiguredModels() {
   const configuredList = Deno.env.get("OPENROUTER_MODELS")
     ?.split(",")
     .map((model) => model.trim())
     .filter(Boolean);
   const singleModel = Deno.env.get("OPENROUTER_MODEL")?.trim();
-  const models = [...(configuredList ?? []), ...(singleModel ? [singleModel] : []), ...fallbackModels];
+  const configuredModels = [...(configuredList ?? []), ...(singleModel ? [singleModel] : [])];
+  const models = configuredModels.length ? configuredModels : fallbackModels;
 
   return [...new Set(models)];
 }
@@ -255,7 +276,7 @@ async function requestOpenRouter(prompt: string, model: string, timeoutMs: numbe
       body: JSON.stringify({
         model,
         temperature: 0.18,
-        max_tokens: 4200,
+        max_tokens: getMaxOutputTokens(),
         response_format: {
           type: "json_object"
         },
@@ -434,7 +455,7 @@ export async function analyzeResumeWithOpenRouter(
   result: AnalysisResult;
   model: string;
 }> {
-  const prompt = buildPrompt(resumeText.slice(0, 18_000), preAnalysis);
+  const prompt = buildPrompt(resumeText.slice(0, getResumeTextMaxChars()), preAnalysis);
   const models = getConfiguredModels();
   const startedAt = Date.now();
   const overallTimeoutMs = getOverallTimeoutMs();
