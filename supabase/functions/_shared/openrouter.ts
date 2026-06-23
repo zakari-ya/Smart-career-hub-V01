@@ -3,9 +3,9 @@ import { AppError, createAppError } from "./errors.ts";
 import type { ResumeStructureAnalysis } from "./resume-pre-analysis.ts";
 
 const fallbackModels = [
-  "openrouter/owl-alpha",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+  "qwen/qwen3-next-80b-a3b-instruct:free",
+  // "meta-llama/llama-3.3-70b-instruct:free", 
+  // "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 ];
 
 class OpenRouterRequestError extends Error {
