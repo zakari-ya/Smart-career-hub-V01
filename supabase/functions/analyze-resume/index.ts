@@ -8,6 +8,7 @@ import {
   logBackendError,
   toAppError
 } from "../_shared/errors.ts";
+import { buildFallbackAnalysisResult } from "../_shared/fallback-analysis.ts";
 import { analyzeResumeWithOpenRouter } from "../_shared/openrouter.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { analyzeResumeStructure } from "../_shared/resume-pre-analysis.ts";
@@ -158,6 +159,70 @@ Deno.serve(async (request) => {
         analysisId: pendingAnalysis.id,
         resumeId
       });
+
+      if (appError.code === "AI_PROVIDER_BUSY") {
+        const preAnalysis = analyzeResumeStructure(
+          resume.extracted_text,
+          resume.layout_metadata && typeof resume.layout_metadata === "object"
+            ? resume.layout_metadata
+            : null
+        );
+        const fallbackResult = buildFallbackAnalysisResult(resume.extracted_text, preAnalysis);
+        const { data: analysisRow, error: fallbackSaveError } = await supabase
+          .from("analyses")
+          .update({
+            provider: "fallback",
+            model: "deterministic-resume-signals-v1",
+            status: "completed",
+            result: fallbackResult,
+            overall_score: Math.round(fallbackResult.scores.overall),
+            ats_score: Math.round(fallbackResult.scores.ats),
+            keyword_score: Math.round(fallbackResult.scores.keywords),
+            impact_score: Math.round(fallbackResult.scores.impact),
+            failure_reason: null
+          })
+          .eq("id", pendingAnalysis.id)
+          .select("*")
+          .single();
+
+        if (fallbackSaveError || !analysisRow) {
+          logBackendError("analyze-resume save fallback analysis failed", requestId, fallbackSaveError, {
+            analysisId: pendingAnalysis.id,
+            resumeId
+          });
+          return errorResponse(createAppError("UNKNOWN_BACKEND_ERROR"), requestId);
+        }
+
+        await supabase.from("audit_logs").insert({
+          user_id: user.id,
+          action: "analyze_resume_fallback",
+          resource_type: "analysis",
+          resource_id: analysisRow.id,
+          metadata: {
+            resumeId: resume.id,
+            code: appError.code,
+            requestId,
+            reason,
+            scores: fallbackResult.scores
+          }
+        });
+
+        return jsonResponse({
+          id: analysisRow.id,
+          resumeId: analysisRow.resume_id,
+          provider: analysisRow.provider,
+          model: analysisRow.model,
+          status: analysisRow.status,
+          result: analysisRow.result,
+          overallScore: fallbackResult.scores.overall,
+          atsScore: fallbackResult.scores.ats,
+          keywordScore: fallbackResult.scores.keywords,
+          impactScore: fallbackResult.scores.impact,
+          failureReason: analysisRow.failure_reason,
+          createdAt: analysisRow.created_at,
+          updatedAt: analysisRow.updated_at
+        });
+      }
 
       await supabase
         .from("analyses")
